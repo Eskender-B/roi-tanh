@@ -43,7 +43,7 @@ class ComponentSeg(nn.Module):
 
 		out = F.interpolate(self.bnorm1(self.conv1(inp)), scale_factor=2, mode='bilinear')
 		out = F.interpolate(self.bnorm2(self.conv2(out)), scale_factor=2, mode='bilinear')
-		return F.softmax(self.conv3(out), dim=1)
+		return self.conv3(out)
 
 
 
@@ -69,18 +69,24 @@ class Model(nn.Module):
 		rect = self.C_PRED(inp1)
 		
 		# Component segm
-		inp2 = self.FPN(inp)
-		lst = []
-		for i in range(rect.shape[0]):
-			lst.append(rect[i].view(-1,4))
+		inp2 = self.FPN(inp)[0]
+		eye1 = rect[:,0:4]
+		eye2 = rect[:,4:8]
+		nose = rect[:,8:12]
+		mouth = rect[:,12:16]
 
+		indx = torch.tensor(range(rect.shape[0]), dtype=torch.float).view(-1,1)
+		eye1 = ops.roi_align(inp2, torch.cat([indx,eye1], dim=1), [32,32], spatial_scale=128./512., sampling_ratio=-1)
+		eye2 = ops.roi_align(inp2, torch.cat([indx,eye2], dim=1), [32,32], spatial_scale=128./512., sampling_ratio=-1)
+		nose = ops.roi_align(inp2, torch.cat([indx,nose], dim=1), [32,32], spatial_scale=128./512., sampling_ratio=-1)
+		mouth = ops.roi_align(inp2, torch.cat([indx,mouth], dim=1), [32,32], spatial_scale=128./512., sampling_ratio=-1)
 
-		roi_features = ops.roi_align(inp2, , [32,32], spatial_scale=128./512., sampling_ratio=-1)
-		print('features: ', roi_features.shape)
 
 		segm_result = []
-		for i in range(4):
-			segm_result.append(roi_features[:,i,:,:,:])
+		segm_result.append(self.C_SEG[0](eye1))
+		segm_result.append(self.C_SEG[1](eye2))
+		segm_result.append(self.C_SEG[2](nose))
+		segm_result.append(self.C_SEG[3](mouth))
 
 
 		# FCN
@@ -92,4 +98,5 @@ class Model(nn.Module):
 
 m = Model()
 
-m.forward(torch.tensor(warped.transpose(2,0,1), dtype=torch.float).view(1, 3, 512,512))
+r,s,f =m.forward(torch.tensor(warped.transpose(2,0,1), dtype=torch.float).view(1, 3, 512,512))
+print(f.shape)
