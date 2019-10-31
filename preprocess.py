@@ -132,12 +132,11 @@ class ImageDataset(Dataset):
 
 
 		## Warp object
-		print("here1")
 		detector = MTCNN()
 		landmarks = detector.detect_faces(image)[0]['keypoints']
 		warp_obj = Warp(landmarks)
 		image, labels=  warp_obj.warp(image), warp_obj.warp(labels)
-		print("here2")
+
 
 
 		## Calculate part rects on warped image
@@ -158,6 +157,6 @@ class ImageDataset(Dataset):
 		if self.transform:
 			sample = self.transform(sample)
 
-		sample['warp_obj': pickle.dumps(warp_obj)]
+		sample['landmarks'] = landmarks
 
 		return sample

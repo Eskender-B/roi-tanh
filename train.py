@@ -1,3 +1,9 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+import numpy as np
+
 from preprocess import Rescale, ToTensor, ImageDataset, DataArg
 from torch.utils.data import DataLoader
 from torchvision import transforms, utils
@@ -32,7 +38,7 @@ train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
 
 valid_dataset = ImageDataset(txt_file='tuning.txt',
                                            root_dir='data/SmithCVPR2013_dataset_resized',
-                                           bg_indexs=set([0,1,10]),
+                                           bg_indexs=set([0]),
                                            transform=transforms.Compose([
                                                ToTensor()
                                            ]))
@@ -42,17 +48,27 @@ valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size,
 
 test_dataset = ImageDataset(txt_file='testing.txt',
                                            root_dir='data/SmithCVPR2013_dataset_resized',
-                                           bg_indexs=set([0,1,10]),
+                                           bg_indexs=set([0]),
                                            transform=transforms.Compose([
                                                ToTensor(),
                                            ]))
-test_loader = DataLoader(test_dataset, batch_size=args.batch_size,
-                        shuffle=True, num_workers=4)
+test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
 
 
 
-model = ICNN(output_maps=9)
+model = Model(output_maps=9)
 optimizer = optim.Adam(model.parameters(), lr=args.lr)
+model = model.to(device)
+
+criterion1 = nn.L1Loss()
+criterion1 = criterion2.to(device)
+
+criterion2 = []
+for i in range(6):
+	criterion2.append(nn.CrossEntropyLoss().to(device))
+
+criterion3 = nn.CrossEntropyLoss().to(device)
+
 
 
 
@@ -62,9 +78,9 @@ def train1(epoch, model, train_loader, optimizer, criterion):
 
 	for i, batch in enumerate(train_loader):
 		optimizer.zero_grad()
-		image, labels = batch['image'].to(device), batch['labels'].to(device)
-		predictions = model(image)
-		loss = criterion(predictions, labels.argmax(dim=1, keepdim=False))
+		image, rects = batch['image'].to(device), batch['rects'].to(device)
+		rects_pred, segm, full = model(image)
+		loss = criterion1(rects_pred, rects)
 
 		loss.backward()
 		optimizer.step()
@@ -86,17 +102,41 @@ def train2(epoch, model, train_loader, optimizer, criterion):
 
 	for i, batch in enumerate(train_loader):
 		optimizer.zero_grad()
-		image, labels = batch['image'].to(device), batch['labels'].to(device)
-		predictions = model(image)
-		loss = criterion(predictions, labels.argmax(dim=1, keepdim=False))
+		image, labels, rects = batch['image'].to(device), batch['labels'].to(device), batch['rects'].to(device)
+		rects_pred, segm, full = model(image)
 
-		loss.backward()
+		## Loss1
+		loss1 = criterion1(rects_pred, rects)
+
+
+		## Loss2
+		parts = [torch.tensor([])] * 6
+		b,c,h,w = image.shape
+
+		for bb in range(b):
+			for i in range(6):
+				x1, y1, x2, y2 = rects[bb][i*4:(i+1)*4].round()
+				p = torch.gather(labels[bb][2+i], 0,  torch.arange(y1, y2+1).unsqueeze(1).repeat_interleave(w,dim=1))
+				p = torch.gather(p, 1,  torch.arange(x1, x2+1).unsqueeze(0).repeat_interleave(y2-y1+1,dim=0))
+				parts[i] = torch.cat([parts[i], F.interpolate(p, [128,128], mode='bilinear')], dim=0)
+
+
+		loss2 = []
+		for i in range(6):
+			loss2.append(criterion2(segm[i], parts[i].view(b,128,128)))
+
+
+		## Loss3
+		loss3 = criterion3(full, torch.index_select(labels, dim=1, torch.tensor([0,1,10]).long()).argmax(dim=1, keepdim=False))
+
+
+		## Total loss
+		tot_loss = loss1 + sum(loss2) + loss3
+		tot_loss.backward()
 		optimizer.step()
 
 
-		loss_list.append(loss.item())
-
-
+		loss_list.append(tot_loss.item())
 		if i % args.display_freq == 0:
 			msg = "Epoch %02d, Iter [%03d/%03d], train loss = %.4f" % (
 			epoch, i, len(train_loader), np.mean(loss_list))
@@ -111,9 +151,9 @@ def evaluate1(model, loader, criterion):
 
 	with torch.no_grad():
 		for batch in loader:
-			image, labels = batch['image'].to(device), batch['labels'].to(device)
-			rect, segm, fcn = model(image)
-			loss = criterion(predictions, labels.argmax(dim=1, keepdim=False))
+			image, rects = batch['image'].to(device), batch['rect'].to(device)
+			rects_pred, segm, full = model(image)
+			loss = criterion1(rects_pred, rects)
 
 			epoch_loss += loss.item()
 
@@ -126,11 +166,35 @@ def evaluate2(model, loader, criterion):
 
 	with torch.no_grad():
 		for batch in loader:
-			image, labels = batch['image'].to(device), batch['labels'].to(device)
-			predictions = model(image)
-			loss = criterion(predictions, labels.argmax(dim=1, keepdim=False))
+				
+			image, labels, rects = batch['image'].to(device), batch['labels'].to(device), batch['rects'].to(device)
+			rects_pred, segm, full = model(image)
 
-			epoch_loss += loss.item()
+			## Loss1
+			loss1 = criterion1(rects_pred, rects)
+
+			## Loss2
+			parts = [torch.tensor([])] * 6
+			b,c,h,w = image.shape
+
+			for bb in range(b):
+				for i in range(6):
+					x1, y1, x2, y2 = rects[bb][i*4:(i+1)*4].round()
+					p = torch.gather(labels[bb][2+i], 0,  torch.arange(y1, y2+1).unsqueeze(1).repeat_interleave(w,dim=1))
+					p = torch.gather(p, 1,  torch.arange(x1, x2+1).unsqueeze(0).repeat_interleave(y2-y1+1,dim=0))
+					parts[i] = torch.cat([parts[i], F.interpolate(p, [128,128], mode='bilinear')], dim=0)
+
+
+			loss2 = []
+			for i in range(6):
+				loss2.append(criterion2(segm[i], parts[i].view(b,128,128)))
+
+			## Loss3
+			loss3 = criterion3(full, torch.index_select(labels, dim=1, torch.tensor([0,1,10]).long()).argmax(dim=1, keepdim=False))
+
+			tot_loss = loss1 + sum(loss2) + loss3
+
+			epoch_loss += tot_loss.item()
 
 	return epoch_loss / len(loader)
 
@@ -156,7 +220,6 @@ for epoch in range(1, args.epochs + 1):
 		epoch_min = epoch
 		pickle.dump(model, open('res/saved-model.pth', 'wb'))
 
-	scheduler.step()
 	msg = '...Epoch %02d, val loss = %.4f' % (epoch, valid_loss)
 	LOG_INFO(msg)
 
