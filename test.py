@@ -1,78 +1,168 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
 import numpy as np
-from mtcnn.mtcnn import MTCNN
-from skimage import io
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from skimage import io, transform
-from scipy.ndimage import map_coordinates
+
+from preprocess import ToTensor, ImageDataset
+from torch.utils.data import DataLoader
+from torchvision import transforms, utils
+import pickle
 
 
-detector = MTCNN()
-
-img = io.imread('img.jpg')
-h,w,c = img.shape
-res = detector.detect_faces(img)[0]['keypoints']
-rows, cols = [], []
-
-for v in res.values():
-	rows.append(v[0])
-	cols.append(v[1])
 
 
-src = np.array([res['left_eye'], res['right_eye'], res['nose'], res['mouth_left'], res['mouth_right']])
-dst = np.array([[-0.25,-0.1], [0.25, -0.1], [0.0, 0.1], [-0.15, 0.4], [0.15, 0.4]])
-tform = transform.estimate_transform('similarity', src, dst)
+parser = argparse.ArgumentParser()
+parser.add_argument("--batch_size", default=10, type=int, help="Batch size to use during training.")
+parser.add_argument("--display_freq", default=10, type=int, help="Display frequency")
+parser.add_argument("--lr", default=0.01, type=float, help="Learning rate for optimizer")
+parser.add_argument("--epochs", default=10, type=int, help="Number of epochs to train")
+args = parser.parse_args()
+print(args)
 
-rec = [[-1.,1.], [1.,1.], [1.,-1.], [-1.,-1.]]
-rect = tform.inverse(rec)
-print("rect", rect)
-
-
-"""
-sampleX = np.expand_dims(np.arctanh(np.linspace(-.99, .99, 512)), 0).repeat(512, 0)
-sampleY = np.expand_dims(np.arctanh(np.linspace(-.99, .99, 512)),-1).repeat(512,-1)
-coords = np.stack([sampleX, sampleY]).transpose(1,2,0)
-coords = np.flip(tform.inverse(coords.reshape(-1,2)).reshape(512,512,2).transpose(2,0,1), 0)
-
-warped0 = map_coordinates(img[:,:,0], coords)
-warped1 = map_coordinates(img[:,:,1], coords)
-warped2 = map_coordinates(img[:,:,2], coords)
-warped = np.stack([warped0, warped1, warped2]).transpose(1,2,0)
-"""
-
-def map_func1(coords):
-	tform2 = transform.SimilarityTransform(scale=1./256., rotation=0, translation=(-1.0, -1.0))
-	return tform.inverse(np.arctanh(tform2(coords)))
-
-def map_func2(coords):
-	tform2 = transform.SimilarityTransform(scale=256., rotation=0, translation=(255.5, 255.5))
-	return tform2(np.tanh(tform(coords)))
+if torch.cuda.is_available():
+	device = torch.device("cuda")
+else:
+	device = torch.device("cpu")
 
 
-warped = transform.warp(img, inverse_map=map_func1, output_shape=[512,512] )
-warped_inv = transform.warp(warped, inverse_map=map_func2, output_shape=img.shape )
+test_dataset = ImageDataset(txt_file='testing.txt',
+                                           root_dir='data/SmithCVPR2013_dataset_resized',
+                                           bg_indexs=set([0]),
+                                           transform=transforms.Compose([
+                                               ToTensor(),
+                                           ]))
+test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
 
 
-fig,ax = plt.subplots(1)
 
-# Display the image
-ax.imshow(img)
+model = pickle.load(open('res/saved-model.pth', 'rb'))
 
-# Create a Rectangle patch
-rect = patches.Polygon(rect, linewidth=2,edgecolor='g', fill=False)
 
-# Add the patch to the Axes
-ax.add_patch(rect)
+def combine_results(rects, segm, full):
+	
+	batch_size,_,_,_ = full.shape
+	pred_labels = torch.zeros([batch_size,11,512,512], dtype=torch.long)
 
-plt.scatter(rows,cols, s=10,marker='x',c='r')
-plt.show()
-plt.close()
+	for bb in range(batch_size):
+		for i in range(6):
+			x1, y1, x2, y2 = rects[bb][i*4:(i+1)*4].round()
+			pred_labels[bb,i+2,y1:y2+1,x1:x2+1] +=  F.interpolate(segm[i][bb].argmax(dim=1), [y2-y1+1,x2-x1+1], mode='bilinear')
 
-fig,ax = plt.subplots(1)
-ax.imshow(warped)
-plt.show()
-plt.close()
 
-fig,ax = plt.subplots(1)
-ax.imshow(warped_inv)
-plt.show()
+
+    
+  return ground_result, pred_result
+
+def save_results(ground, pred, indexs, offsets, shapes):
+
+  ground = np.uint8(ground.clamp(0., 255.).to('cpu').numpy())
+  pred = np.uint8(pred.detach().clamp(0.,255.).to('cpu').numpy())
+
+  for i,idx in enumerate(indexs):
+    y1,x1 = offsets[i]
+    y2,x2 = offsets[i] + shapes[i]
+    plt.figure(figsize=(12.8, 9.6))
+
+    ax = plt.subplot(1, 2, 1)
+    ax.set_title("Ground Truth")
+    plt.imshow(ground[i,y1:y2,x1:x2,:])
+
+    ax = plt.subplot(1, 2, 2)
+    ax.set_title("Predicted")
+    plt.imshow(pred[i,y1:y2,x1:x2,:])
+
+    plt.savefig('res/'+unresized_dataset.name_list[idx, 1].strip() + '.jpg')
+    plt.close()
+
+
+TP = {'eyebrow':0, 'eye':0, 'nose':0, 'u_lip':0, 'i_mouth':0, 'l_lip':0}
+FP = {'eyebrow':0, 'eye':0, 'nose':0, 'u_lip':0, 'i_mouth':0, 'l_lip':0}
+TN = {'eyebrow':0, 'eye':0, 'nose':0, 'u_lip':0, 'i_mouth':0, 'l_lip':0}
+FN = {'eyebrow':0, 'eye':0, 'nose':0, 'u_lip':0, 'i_mouth':0, 'l_lip':0}
+
+def calculate_F1(labels, pred_labels):
+  global TP, FP, TN, FN
+  for name in ['eyebrow', 'eye', 'nose']:
+    TP[name]+= (batches[name]['labels'][:,0,:,:] * pred_labels[name][:,0,:,:]).sum().tolist()
+    FP[name]+= (batches[name]['labels'][:,1,:,:] * pred_labels[name][:,0,:,:]).sum().tolist()
+    TN[name]+= (batches[name]['labels'][:,1,:,:] * pred_labels[name][:,1,:,:]).sum().tolist()
+    FN[name]+= (batches[name]['labels'][:,0,:,:] * pred_labels[name][:,1,:,:]).sum().tolist()
+
+  ground = torch.cat( [batches['mouth']['labels'].index_select(1, torch.tensor([0]).to(device)), batches['mouth']['labels'].index_select(1, torch.tensor([1,2,3]).to(device)).sum(1, keepdim=True)], 1)
+  pred = torch.cat( [pred_labels['mouth'].index_select(1, torch.tensor([0]).to(device)), pred_labels['mouth'].index_select(1, torch.tensor([1,2,3]).to(device)).sum(1, keepdim=True)], 1)
+  TP['u_lip']+= (ground[:,0,:,:] * pred[:,0,:,:]).sum().tolist()
+  FP['u_lip']+= (ground[:,1,:,:] * pred[:,0,:,:]).sum().tolist()
+  TN['u_lip']+= (ground[:,1,:,:] * pred[:,1,:,:]).sum().tolist()
+  FN['u_lip']+= (ground[:,0,:,:] * pred[:,1,:,:]).sum().tolist()
+
+  ground = torch.cat( [batches['mouth']['labels'].index_select(1, torch.tensor([1]).to(device)), batches['mouth']['labels'].index_select(1, torch.tensor([0,2,3]).to(device)).sum(1, keepdim=True)], 1)
+  pred = torch.cat( [pred_labels['mouth'].index_select(1, torch.tensor([1]).to(device)), pred_labels['mouth'].index_select(1, torch.tensor([0,2,3]).to(device)).sum(1, keepdim=True)], 1)
+  TP['i_mouth']+= (ground[:,0,:,:] * pred[:,0,:,:]).sum().tolist()
+  FP['i_mouth']+= (ground[:,1,:,:] * pred[:,0,:,:]).sum().tolist()
+  TN['i_mouth']+= (ground[:,1,:,:] * pred[:,1,:,:]).sum().tolist()
+  FN['i_mouth']+= (ground[:,0,:,:] * pred[:,1,:,:]).sum().tolist()
+
+  ground = torch.cat( [batches['mouth']['labels'].index_select(1, torch.tensor([2]).to(device)), batches['mouth']['labels'].index_select(1, torch.tensor([0,1,3]).to(device)).sum(1, keepdim=True)], 1)
+  pred = torch.cat( [pred_labels['mouth'].index_select(1, torch.tensor([2]).to(device)), pred_labels['mouth'].index_select(1, torch.tensor([0,1,3]).to(device)).sum(1, keepdim=True)], 1)
+  TP['l_lip']+= (ground[:,0,:,:] * pred[:,0,:,:]).sum().tolist()
+  FP['l_lip']+= (ground[:,1,:,:] * pred[:,0,:,:]).sum().tolist()
+  TN['l_lip']+= (ground[:,1,:,:] * pred[:,1,:,:]).sum().tolist()
+  FN['l_lip']+= (ground[:,0,:,:] * pred[:,1,:,:]).sum().tolist()
+
+
+def show_F1():
+  F1 = {}
+  PRECISION = {}
+  RECALL = {}
+  tot_p = 0.0
+  tot_r = 0.0
+  for key in TP:
+    PRECISION[key] = float(TP[key]) / (TP[key] + FP[key])
+    RECALL[key] = float(TP[key]) / (TP[key] + FN[key])
+    F1[key] = 2.*PRECISION[key]*RECALL[key]/(PRECISION[key]+RECALL[key])
+
+    tot_p += PRECISION[key]
+    tot_r += RECALL[key]
+
+  #avg_p = tot_p/len(TP)
+  #avg_r = tot_r/len(TP)
+  #overall_F1 = 2.* avg_p*avg_r/ (avg_p+avg_r)
+
+  mouth_p = (PRECISION['u_lip'] + PRECISION['i_mouth'] + PRECISION['l_lip'])/3.0
+  mouth_r = (RECALL['u_lip'] + RECALL['i_mouth'] + RECALL['l_lip'])/3.0
+  mouth_F1 = 2.* mouth_p * mouth_r / (mouth_p+mouth_r)
+
+  avg_p = (PRECISION['eyebrow']+PRECISION['eye']+PRECISION['nose']+mouth_p)/4.0
+  avg_r = (RECALL['eyebrow']+RECALL['eye']+RECALL['nose']+mouth_r)/4.0
+  overall_F1 = 2.* avg_p*avg_r/ (avg_p+avg_r)
+
+
+  print("\n\n", "PART\t\t", "F1-MEASURE ", "PRECISION ", "RECALL")
+  for k in F1:
+    print("%s\t\t"%k, "%.4f\t"%F1[k], "%.4f\t"%PRECISION[k], "%.4f\t"%RECALL[k])
+
+  print("mouth(all)\t", "%.4f\t"%mouth_F1, "%.4f\t"%mouth_p, "%.4f\t"%mouth_r)
+  print("Overall\t\t", "%.4f\t"%overall_F1, "%.4f\t"%avg_p, "%.4f\t"%avg_r)
+
+
+
+def test(model, loader, criterion):
+	epoch_loss = 0
+	model.eval()
+
+	with torch.no_grad():
+		for batch in loader:
+				
+			image, labels, rects = batch['image'].to(device), batch['labels'].to(device), batch['rects'].to(device)
+			rects_pred, segm, full = model(image)
+
+			pred_labels = combine_results(rects_pred, segm, full)
+			calculate_F1(pred_labels, labels)
+			save_results(image, pred_labels, labels)
+
+
+
+if __name__ == '__main__':
+	test()
+	show_F1()

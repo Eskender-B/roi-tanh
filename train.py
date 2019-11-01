@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 
-from preprocess import Rescale, ToTensor, ImageDataset, DataArg
+from preprocess import ToTensor, ImageDataset
 from torch.utils.data import DataLoader
 from torchvision import transforms, utils
 
@@ -60,8 +60,7 @@ model = Model(output_maps=9)
 optimizer = optim.Adam(model.parameters(), lr=args.lr)
 model = model.to(device)
 
-criterion1 = nn.L1Loss()
-criterion1 = criterion2.to(device)
+criterion1 = nn.L1Loss().to(device)
 
 criterion2 = []
 for i in range(6):
@@ -114,17 +113,26 @@ def train2(epoch, model, train_loader, optimizer, criterion):
 		b,c,h,w = image.shape
 
 		for bb in range(b):
-			for i in range(6):
+			# Non-mouth
+			for i in range(5):
 				x1, y1, x2, y2 = rects[bb][i*4:(i+1)*4].round()
 				p = torch.gather(labels[bb][2+i], 0,  torch.arange(y1, y2+1).unsqueeze(1).repeat_interleave(w,dim=1))
 				p = torch.gather(p, 1,  torch.arange(x1, x2+1).unsqueeze(0).repeat_interleave(y2-y1+1,dim=0))
-				parts[i] = torch.cat([parts[i], F.interpolate(p, [128,128], mode='bilinear')], dim=0)
+				p = torch.stack([1-p, p])  # background
+				parts[i] = torch.cat([parts[i], F.interpolate(p, [128,128], mode='bilinear').argmax(dim=0)], dim=0)
+
+			# Mouth
+			x1, y1, x2, y2 = rects[bb][20:24].round()
+			p = torch.gather(labels[bb][7:10], 0,  torch.arange(y1, y2+1).unsqueeze(1).repeat_interleave(w,dim=1).unsqueeze(0).repeat_interleave(3,dim=0))
+			p = torch.gather(p, 1,  torch.arange(x1, x2+1).unsqueeze(0).repeat_interleave(y2-y1+1,dim=0).unsqueeze(0).repeat_interleave(3,dim=0))
+			p = torch.cat([1-p.sum(dim=0,keepdim=True), p], 0)  # background
+			parts[i] = torch.cat([parts[i], F.interpolate(p, [128,128], mode='bilinear').argmax(dim=0)], dim=0)
+
 
 
 		loss2 = []
 		for i in range(6):
 			loss2.append(criterion2(segm[i], parts[i].view(b,128,128)))
-
 
 		## Loss3
 		loss3 = criterion3(full, torch.index_select(labels, dim=1, torch.tensor([0,1,10]).long()).argmax(dim=1, keepdim=False))
