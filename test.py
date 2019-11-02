@@ -11,7 +11,6 @@ import pickle
 
 
 
-
 parser = argparse.ArgumentParser()
 parser.add_argument("--batch_size", default=10, type=int, help="Batch size to use during training.")
 parser.add_argument("--display_freq", default=10, type=int, help="Display frequency")
@@ -45,70 +44,36 @@ def combine_results(rects, segm, full):
 	pred_labels = torch.zeros([batch_size,11,512,512], dtype=torch.long)
 
 	for bb in range(batch_size):
-		for i in range(6):
+		# Non-mouth parts
+		for i in range(5):
 			x1, y1, x2, y2 = rects[bb][i*4:(i+1)*4].round()
-			pred_labels[bb,i+2,y1:y2+1,x1:x2+1] +=  F.interpolate(segm[i][bb].argmax(dim=1), [y2-y1+1,x2-x1+1], mode='bilinear')
+			pred_labels[bb,i+2,y1:y2+1,x1:x2+1] =  F.interpolate(segm[i][bb], [y2-y1+1,x2-x1+1], mode='bilinear').argmax(dim=0)
+
+		# Mouth parts
+		x1, y1, x2, y2 = rects[bb][20:24].round()
+		pred_labels[bb,7:10,y1:y2+1,x1:x2+1] =  F.one_hot(F.interpolate(segm[5][bb], [y2-y1+1,x2-x1+1], mode='bilinear').argmax(dim=0) , 4).transpose(3,1).transpose(2,3)[1:4]
 
 
+	# background,skin,hair
+	pred_labels[:,0:2,:,:] =  full[:,0:2,:,:]
+	pred_labels[:,10,:,:] =  full[:,3,:,:]
 
-    
-  return ground_result, pred_result
-
-def save_results(ground, pred, indexs, offsets, shapes):
-
-  ground = np.uint8(ground.clamp(0., 255.).to('cpu').numpy())
-  pred = np.uint8(pred.detach().clamp(0.,255.).to('cpu').numpy())
-
-  for i,idx in enumerate(indexs):
-    y1,x1 = offsets[i]
-    y2,x2 = offsets[i] + shapes[i]
-    plt.figure(figsize=(12.8, 9.6))
-
-    ax = plt.subplot(1, 2, 1)
-    ax.set_title("Ground Truth")
-    plt.imshow(ground[i,y1:y2,x1:x2,:])
-
-    ax = plt.subplot(1, 2, 2)
-    ax.set_title("Predicted")
-    plt.imshow(pred[i,y1:y2,x1:x2,:])
-
-    plt.savefig('res/'+unresized_dataset.name_list[idx, 1].strip() + '.jpg')
-    plt.close()
+	return pred_labels
 
 
-TP = {'eyebrow':0, 'eye':0, 'nose':0, 'u_lip':0, 'i_mouth':0, 'l_lip':0}
-FP = {'eyebrow':0, 'eye':0, 'nose':0, 'u_lip':0, 'i_mouth':0, 'l_lip':0}
-TN = {'eyebrow':0, 'eye':0, 'nose':0, 'u_lip':0, 'i_mouth':0, 'l_lip':0}
-FN = {'eyebrow':0, 'eye':0, 'nose':0, 'u_lip':0, 'i_mouth':0, 'l_lip':0}
+TP = {'skin':0, 'eyebrow1':0, 'eyebrow2':0, 'eye1':0, 'eye2':0, 'nose':0, 'u_lip':0, 'i_mouth':0, 'l_lip':0, 'hair':0}
+FP = {'skin':0, 'eyebrow1':0, 'eyebrow2':0, 'eye1':0, 'eye2':0, 'nose':0, 'u_lip':0, 'i_mouth':0, 'l_lip':0, 'hair':0}
+TN = {'skin':0, 'eyebrow1':0, 'eyebrow2':0, 'eye1':0, 'eye2':0, 'nose':0, 'u_lip':0, 'i_mouth':0, 'l_lip':0, 'hair':0}
+FN = {'skin':0, 'eyebrow1':0, 'eyebrow2':0, 'eye1':0, 'eye2':0, 'nose':0, 'u_lip':0, 'i_mouth':0, 'l_lip':0, 'hair':0}
+
 
 def calculate_F1(labels, pred_labels):
   global TP, FP, TN, FN
-  for name in ['eyebrow', 'eye', 'nose']:
-    TP[name]+= (batches[name]['labels'][:,0,:,:] * pred_labels[name][:,0,:,:]).sum().tolist()
-    FP[name]+= (batches[name]['labels'][:,1,:,:] * pred_labels[name][:,0,:,:]).sum().tolist()
-    TN[name]+= (batches[name]['labels'][:,1,:,:] * pred_labels[name][:,1,:,:]).sum().tolist()
-    FN[name]+= (batches[name]['labels'][:,0,:,:] * pred_labels[name][:,1,:,:]).sum().tolist()
-
-  ground = torch.cat( [batches['mouth']['labels'].index_select(1, torch.tensor([0]).to(device)), batches['mouth']['labels'].index_select(1, torch.tensor([1,2,3]).to(device)).sum(1, keepdim=True)], 1)
-  pred = torch.cat( [pred_labels['mouth'].index_select(1, torch.tensor([0]).to(device)), pred_labels['mouth'].index_select(1, torch.tensor([1,2,3]).to(device)).sum(1, keepdim=True)], 1)
-  TP['u_lip']+= (ground[:,0,:,:] * pred[:,0,:,:]).sum().tolist()
-  FP['u_lip']+= (ground[:,1,:,:] * pred[:,0,:,:]).sum().tolist()
-  TN['u_lip']+= (ground[:,1,:,:] * pred[:,1,:,:]).sum().tolist()
-  FN['u_lip']+= (ground[:,0,:,:] * pred[:,1,:,:]).sum().tolist()
-
-  ground = torch.cat( [batches['mouth']['labels'].index_select(1, torch.tensor([1]).to(device)), batches['mouth']['labels'].index_select(1, torch.tensor([0,2,3]).to(device)).sum(1, keepdim=True)], 1)
-  pred = torch.cat( [pred_labels['mouth'].index_select(1, torch.tensor([1]).to(device)), pred_labels['mouth'].index_select(1, torch.tensor([0,2,3]).to(device)).sum(1, keepdim=True)], 1)
-  TP['i_mouth']+= (ground[:,0,:,:] * pred[:,0,:,:]).sum().tolist()
-  FP['i_mouth']+= (ground[:,1,:,:] * pred[:,0,:,:]).sum().tolist()
-  TN['i_mouth']+= (ground[:,1,:,:] * pred[:,1,:,:]).sum().tolist()
-  FN['i_mouth']+= (ground[:,0,:,:] * pred[:,1,:,:]).sum().tolist()
-
-  ground = torch.cat( [batches['mouth']['labels'].index_select(1, torch.tensor([2]).to(device)), batches['mouth']['labels'].index_select(1, torch.tensor([0,1,3]).to(device)).sum(1, keepdim=True)], 1)
-  pred = torch.cat( [pred_labels['mouth'].index_select(1, torch.tensor([2]).to(device)), pred_labels['mouth'].index_select(1, torch.tensor([0,1,3]).to(device)).sum(1, keepdim=True)], 1)
-  TP['l_lip']+= (ground[:,0,:,:] * pred[:,0,:,:]).sum().tolist()
-  FP['l_lip']+= (ground[:,1,:,:] * pred[:,0,:,:]).sum().tolist()
-  TN['l_lip']+= (ground[:,1,:,:] * pred[:,1,:,:]).sum().tolist()
-  FN['l_lip']+= (ground[:,0,:,:] * pred[:,1,:,:]).sum().tolist()
+  for i,name in enumerate(['skin', 'eyebrow1', 'eyebrow2' 'eye1', 'eye2', 'nose', 'u_lip', 'i_mouth', 'l_lip', 'hair']):
+    TP[name]+= (labels[:,i+1,:,:] * pred_labels[:,i+1,:,:]).sum().tolist()
+    FP[name]+= ( ((labels[:,i+1,:,:]-1)*-1) * pred_labels[:,i+1,:,:]).sum().tolist()
+    TN[name]+= ( ((labels[:,i+1,:,:]-1)*-1) * ((pred_labels[:,i+1,:,:]-1)*-1) ).sum().tolist()
+    FN[name]+= (labels[:,i+1,:,:] * ((pred_labels[:,i+1,:,:]-1)*-1) ).sum().tolist()
 
 
 def show_F1():
@@ -133,8 +98,8 @@ def show_F1():
   mouth_r = (RECALL['u_lip'] + RECALL['i_mouth'] + RECALL['l_lip'])/3.0
   mouth_F1 = 2.* mouth_p * mouth_r / (mouth_p+mouth_r)
 
-  avg_p = (PRECISION['eyebrow']+PRECISION['eye']+PRECISION['nose']+mouth_p)/4.0
-  avg_r = (RECALL['eyebrow']+RECALL['eye']+RECALL['nose']+mouth_r)/4.0
+  avg_p, avg_r = tot_p/len(PRECISION), tot_r/len(RECALL)
+
   overall_F1 = 2.* avg_p*avg_r/ (avg_p+avg_r)
 
 
@@ -147,6 +112,47 @@ def show_F1():
 
 
 
+def save_results(images, labels, pred_labels, indexs):
+
+	colors = torch.tensor([[0,0,0], [255,255,0], [255,0,0], [255,0,0], [0,0,255], [0,0,255], [255,165,0], [0,255,255], [0,255,0], [255,0,255], [150,75,0]]).to(device)
+
+	orig_mask = labels.unsqueeze(-1) * colors.view(1,11,1,1,3)
+	orig_mask = orig_mask.sum(1).float() # May need to fix here
+
+	pred_mask = pred_labels.unsqueeze(-1) * colors.view(1,11,1,1,3)
+	pred_mask = pred_mask.sum(1).float() # May need to fix here
+
+	alpha = 0.1
+	ground = torch.where(orig_mask==torch.tensor([0., 0., 0.]).to(device), images, alpha*images + (1.-alpha)*orig_mask)
+	pred = torch.where(pred_mask==torch.tensor([0., 0., 0.]).to(device), images, alpha*images + (1.-alpha)*pred_mask)  
+
+
+	ground = np.uint8(ground.clamp(0., 255.).to('cpu').numpy())
+	pred = np.uint8(pred.detach().clamp(0.,255.).to('cpu').numpy())
+
+	for i,idx in enumerate(indexs):
+		plt.figure(figsize=(12.8, 9.6))
+
+		ax = plt.subplot(1, 2, 1)
+		ax.set_title("Ground Truth")
+		plt.imshow(ground)
+
+		ax = plt.subplot(1, 2, 2)
+		ax.set_title("Predicted")
+		plt.imshow(pred)
+
+		plt.savefig('res/'+test_dataset.name_list[idx, 1].strip() + '.jpg')
+		plt.close()
+
+
+def dewarp(image, labels, pred_labels, landmarks):
+	pass
+
+r_error =0.0
+def rects_error(rects, pred_rects):
+	pass
+
+
 def test(model, loader, criterion):
 	epoch_loss = 0
 	model.eval()
@@ -154,15 +160,20 @@ def test(model, loader, criterion):
 	with torch.no_grad():
 		for batch in loader:
 				
-			image, labels, rects = batch['image'].to(device), batch['labels'].to(device), batch['rects'].to(device)
-			rects_pred, segm, full = model(image)
+			images, labels, rects, landmarks, indexs = batch['image'].to(device), batch['labels'].to(device), batch['rects'].to(device), batch['landmarks'], batch['indexs']
+			pred_rects, segm, full = model(images)
 
 			pred_labels = combine_results(rects_pred, segm, full)
-			calculate_F1(pred_labels, labels)
-			save_results(image, pred_labels, labels)
+			images, labels, pred_labels = dewarp(images, labels, pred_labels, landmarks)
+			
+			rects_error(rects, pred_rects)
+			calculate_F1(labels, pred_labels)
+			save_results(images, labels, pred_labels, indexs)
 
 
 
 if __name__ == '__main__':
 	test()
 	show_F1()
+	print()
+	print("Rects Error: ", r_error)
