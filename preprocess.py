@@ -42,15 +42,16 @@ class ToTensor(object):
 	"""Convert ndarrays in sample to Tensors."""
 
 	def __call__(self, sample):
-		image, labels, rects, idx = sample['image'], sample['labels'], sample['rects'], sample['index']
+		image, labels, rects, landmarks, idx = sample['image'], sample['labels'], sample['rects'], sample['landmarks'], sample['index']
 
 		# swap color axis because
 		# numpy image: H x W x C
 		# torch image: C X H X W
 		image = image.transpose((2, 0, 1))
 		return {'image': torch.from_numpy(image).float(),
-		'labels': torch.from_numpy(labels).float(),
+		'labels': F.one_hot(torch.from_numpy(labels).argmax(dim=1), labels.shape[1]).transpose(3,1).transpose(2,3),
 		'rects': torch.from_numpy(rects).float(),
+		'landmarks': landmarks,
 		'index': idx}
 
 
@@ -60,7 +61,7 @@ class Warp(object):
 	def __init__(self, landmarks):
 		self.landmarks = landmarks
 
-		src = np.array([self.landmarks['left_eye'], self.landmarks['right_eye'], self.landmarks['nose'], self.landmarks['mouth_left'], self.landmarks['mouth_right']])
+		src = np.array(self.landmarks)
 		dst = np.array([[-0.25,-0.1], [0.25, -0.1], [0.0, 0.1], [-0.15, 0.4], [0.15, 0.4]])
 		self.tform = transform.estimate_transform('similarity', src, dst)
 
@@ -86,7 +87,7 @@ class Warp(object):
 
 class ImageDataset(Dataset):
 	"""Image dataset."""
-	def __init__(self, txt_file, root_dir, bg_indexs=set([]), fg_indexs=None, transform=None):
+	def __init__(self, txt_file, root_dir, bg_indexs=set([]), fg_indexs=None, transform=None, warp_on_fly=False):
 		"""
 		Args:
 		txt_file (string): Path to the txt file with list of image id, name.
@@ -131,32 +132,37 @@ class ImageDataset(Dataset):
 			labels = torch.cat([labels, torch.tensor(255).to(labels.device) - labels.sum(0, keepdim=True)], 0)
 
 
-		## Warp object
-		detector = MTCNN()
-		landmarks = detector.detect_faces(image)[0]['keypoints']
-		warp_obj = Warp(landmarks)
-		image, labels=  warp_obj.warp(image), warp_obj.warp(labels)
+		
+		if warp_on_fly:
+			## Warp object
+			detector = MTCNN()
+			landmarks = detector.detect_faces(image)[0]['keypoints']
+			landmarks = np.array([landmarks[key] for key in ['left_eye', 'right_eye', 'nose', 'mouth_left', 'mouth_right']])
+			warp_obj = Warp(landmarks)
+			image, labels=  warp_obj.warp(image), warp_obj.warp(labels)
 
 
+			## Calculate part rects on warped image
+			rects = []
+			for i in [2,3,4,5,6]:
+				x,y,w,h = cv2.boundingRect(get_largest(labels[i], 1))
+				rects.extend([x,y,x+w,y+h])
 
-		## Calculate part rects on warped image
-		rects = []
-		for i in [2,3,4,5,6]:
-			x,y,w,h = cv2.boundingRect(get_largest(labels[i], 1))
+			mouth = np.clip(labels[7] + labels[8] + labels[9], 0, 255)
+			x,y,w,h = cv2.boundingRect(get_largest(mouth, 1))
 			rects.extend([x,y,x+w,y+h])
 
-		mouth = np.clip(labels[7] + labels[8] + labels[9], 0, 255)
-		x,y,w,h = cv2.boundingRect(get_largest(mouth, 1))
-		rects.extend([x,y,x+w,y+h])
+			rects = np.array(rects)
 
-		rects = np.array(rects)
+		else:
+			rects = self.name_list[idx,2:26]
+			landmarks = self.name_list[26:36].reshape(5,2)
 
 
-		sample = {'image': image, 'labels': labels, 'rects':rects, 'index':idx}
+
+		sample = {'image': image, 'labels': labels, 'rects':rects, 'landmarks':landmarks, 'index':idx}
 
 		if self.transform:
 			sample = self.transform(sample)
-
-		sample['landmarks'] = landmarks
 
 		return sample
