@@ -10,9 +10,6 @@ import cv2
 
 def get_largest(im, n):
 	# Find contours of the shape
-
-	im = np.uint8(im)
-
 	major = cv2.__version__.split('.')[0]
 	if major == '3':
 		_, contours, _ = cv2.findContours(im.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -46,7 +43,7 @@ class Warp(object):
 
 	def warp(self, img):
 		def map_func1(coords):
-			tform2 = transform.SimilarityTransform(scale=1./256., rotation=0, translation=(-1.0, -1.0))
+			tform2 = transform.SimilarityTransform(scale=1./257., rotation=0, translation=(-0.99, -0.99))
 			return self.tform.inverse(np.arctanh(tform2(coords)))
 
 		warped = transform.warp(img, inverse_map=map_func1, output_shape=[512,512] )
@@ -54,7 +51,7 @@ class Warp(object):
 
 	def inverse(self, warped, output_shape):
 		def map_func2(coords):
-			tform2 = transform.SimilarityTransform(scale=256., rotation=0, translation=(255.5, 255.5))
+			tform2 = transform.SimilarityTransform(scale=257., rotation=0, translation=(255.5, 255.5))
 			return tform2(np.tanh(tform(coords)))
 
 		warped_inv = transform.warp(warped, inverse_map=map_func2, output_shape=output_shape )
@@ -71,7 +68,7 @@ def prepare(root_dir, new_dir, txt_file):
 		img_name = os.path.join(root_dir, 'images',
 					name_list[idx, 1].strip() + '.jpg')
 
-		image = np.array(io.imread(img_name), dtype=np.float)
+		image = io.imread(img_name)
 
 		label_name = os.path.join(root_dir, 'labels',
 			name_list[idx, 1].strip(), name_list[idx, 1].strip() + '_lbl%.2d.png')
@@ -81,7 +78,7 @@ def prepare(root_dir, new_dir, txt_file):
 		for i in self.fg_indexs:
 			labels.append(io.imread(label_name%i))
 		
-		labels = np.array(labels, dtype=np.float)
+		labels = np.array(labels)
 
 
 		"""
@@ -103,7 +100,7 @@ def prepare(root_dir, new_dir, txt_file):
 		landmarks = detector.detect_faces(image)[0]['keypoints']
 		landmarks = np.array([landmarks[key] for key in ['left_eye', 'right_eye', 'nose', 'mouth_left', 'mouth_right']])
 		warp_obj = Warp(landmarks)
-		image, labels=  warp_obj.warp(image), warp_obj.warp(labels)
+		image, labels=  np.uint8(warp_obj.warp(image)*255), np.uint8(warp_obj.warp(labels)*255)
 
 		## Save warped image and label
 		img_name = os.path.join(new_dir, 'images',

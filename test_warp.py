@@ -10,6 +10,9 @@ from scipy.ndimage import map_coordinates
 detector = MTCNN()
 
 img = io.imread('img.jpg')
+print('test', img[0][0])
+print('test', img.dtype)
+
 h,w,c = img.shape
 res = detector.detect_faces(img)[0]['keypoints']
 rows, cols = [], []
@@ -41,16 +44,22 @@ warped = np.stack([warped0, warped1, warped2]).transpose(1,2,0)
 """
 
 def map_func1(coords):
-	tform2 = transform.SimilarityTransform(scale=1./256., rotation=0, translation=(-1.0, -1.0))
+	tform2 = transform.SimilarityTransform(scale=1./257., rotation=0, translation=(-0.99, -0.99))
 	return tform.inverse(np.arctanh(tform2(coords)))
 
 def map_func2(coords):
-	tform2 = transform.SimilarityTransform(scale=256., rotation=0, translation=(255.5, 255.5))
+	tform2 = transform.SimilarityTransform(scale=257., rotation=0, translation=(255.5, 255.5))
 	return tform2(np.tanh(tform(coords)))
 
 
 warped = transform.warp(img, inverse_map=map_func1, output_shape=[512,512] )
 warped_inv = transform.warp(warped, inverse_map=map_func2, output_shape=img.shape )
+
+
+print('test', warped[0][0])
+print('test', warped_inv[0][0])
+print('test', warped.max(), warped_inv.max())
+print('test', warped.dtype, warped_inv.dtype)
 
 
 fig,ax = plt.subplots(1)

@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 
-from preprocess import ToTensor, ImageDataset
+from preprocess import ToTensor, ImageDataset, Warp
 from torch.utils.data import DataLoader
 from torchvision import transforms, utils
 import pickle
@@ -28,9 +28,11 @@ else:
 test_dataset = ImageDataset(txt_file='testing.txt',
                                            root_dir='data/SmithCVPR2013_dataset_resized',
                                            bg_indexs=set([0]),
+                                           warp_on_fly=True,
                                            transform=transforms.Compose([
                                                ToTensor(),
-                                           ]))
+                                           ])
+                                           )
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
 
 
@@ -114,6 +116,7 @@ def show_F1():
 
 def save_results(images, labels, pred_labels, indexs):
 
+	images = images*255
 	colors = torch.tensor([[0,0,0], [255,255,0], [255,0,0], [255,0,0], [0,0,255], [0,0,255], [255,165,0], [0,255,255], [0,255,0], [255,0,255], [150,75,0]]).to(device)
 
 	orig_mask = labels.unsqueeze(-1) * colors.view(1,11,1,1,3)
@@ -145,8 +148,26 @@ def save_results(images, labels, pred_labels, indexs):
 		plt.close()
 
 
-def dewarp(image, labels, pred_labels, landmarks):
-	pass
+def dewarp(images, labels, pred_labels, landmarks, orig_size):
+	images = images.numpy().transpose(0,2,3,1)
+	labels = labels.float().numpy().transpose(0,2,3,1)
+	pred_labels = pred_labels.float().numpy().transpose(0,2,3,1)
+	b,h,w,l = labels.shape
+
+	dimages, dlabels, dpred_labels = [],[],[]
+	for i in range(b):
+		warp_obj = Warp(landmarks[i])
+		dimages.append(warp_obj.inverse(images[i], orig_size[i]))
+		dlabels.append(warp_obj.inverse(labels[i], orig_size[i]))
+		dpred_labels.append(warp_obj.inverse(pred_labels[i], orig_size[i]))
+
+	dimages = torch.from_numpy(np.array(dimages).transpose(0,3,1,2))
+	dlabels = F.one_hot( torch.from_numpy(np.array(dlabels).transpose(0,3,1,2)), l).transpose(1,3).transpose(2,3)
+	dpred_labels = F.one_hot( torch.from_numpy(np.array(dpred_labels).transpose(0,3,1,2)), l).transpose(1,3).transpose(2,3)
+
+	return dimages, dlabels, dpred_labels
+
+
 
 r_error =0.0
 def rects_error(rects, pred_rects):
@@ -160,11 +181,11 @@ def test(model, loader, criterion):
 	with torch.no_grad():
 		for batch in loader:
 				
-			images, labels, rects, landmarks, indexs = batch['image'].to(device), batch['labels'].to(device), batch['rects'].to(device), batch['landmarks'], batch['indexs']
+			images, labels, rects, landmarks, indexs, orig_size = batch['image'].to(device), batch['labels'].to(device), batch['rects'].to(device), batch['landmarks'], batch['indexs'], batch['orig_size']
 			pred_rects, segm, full = model(images)
 
 			pred_labels = combine_results(rects_pred, segm, full)
-			images, labels, pred_labels = dewarp(images, labels, pred_labels, landmarks)
+			images, labels, pred_labels = dewarp(images, labels, pred_labels, landmarks, orig_size)
 			
 			rects_error(rects, pred_rects)
 			calculate_F1(labels, pred_labels)
