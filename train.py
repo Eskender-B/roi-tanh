@@ -27,7 +27,7 @@ else:
 
 
 train_dataset = ImageDataset(txt_file='exemplars.txt',
-                                           root_dir='data/SmithCVPR2013_dataset_resized',
+                                           root_dir='data/SmithCVPR2013_dataset_warped',
                                            bg_indexs=set([0]),
                                            transform=transforms.Compose([                                               ,
                                                ToTensor()
@@ -37,7 +37,7 @@ train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
 
 
 valid_dataset = ImageDataset(txt_file='tuning.txt',
-                                           root_dir='data/SmithCVPR2013_dataset_resized',
+                                           root_dir='data/SmithCVPR2013_dataset_warped',
                                            bg_indexs=set([0]),
                                            transform=transforms.Compose([
                                                ToTensor()
@@ -47,7 +47,7 @@ valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size,
 
 
 test_dataset = ImageDataset(txt_file='testing.txt',
-                                           root_dir='data/SmithCVPR2013_dataset_resized',
+                                           root_dir='data/SmithCVPR2013_dataset_warped',
                                            bg_indexs=set([0]),
                                            transform=transforms.Compose([
                                                ToTensor(),
@@ -56,7 +56,7 @@ test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True,
 
 
 
-model = Model(output_maps=9)
+model = Model()
 optimizer = optim.Adam(model.parameters(), lr=args.lr)
 model = model.to(device)
 
@@ -78,8 +78,8 @@ def train1(epoch, model, train_loader, optimizer, criterion):
 	for i, batch in enumerate(train_loader):
 		optimizer.zero_grad()
 		image, rects = batch['image'].to(device), batch['rects'].to(device)
-		rects_pred, segm, full = model(image)
-		loss = criterion1(rects_pred, rects)
+		pred_rects, segm, full = model(image)
+		loss = criterion1(pred_rects, rects)
 
 		loss.backward()
 		optimizer.step()
@@ -102,10 +102,10 @@ def train2(epoch, model, train_loader, optimizer, criterion):
 	for i, batch in enumerate(train_loader):
 		optimizer.zero_grad()
 		image, labels, rects = batch['image'].to(device), batch['labels'].to(device), batch['rects'].to(device)
-		rects_pred, segm, full = model(image)
+		pred_rects, segm, full = model(image)
 
 		## Loss1
-		loss1 = criterion1(rects_pred, rects)
+		loss1 = criterion1(pred_rects, rects)
 
 
 		## Loss2
@@ -119,14 +119,14 @@ def train2(epoch, model, train_loader, optimizer, criterion):
 				p = torch.gather(labels[bb][2+i], 0,  torch.arange(y1, y2+1).unsqueeze(1).repeat_interleave(w,dim=1))
 				p = torch.gather(p, 1,  torch.arange(x1, x2+1).unsqueeze(0).repeat_interleave(y2-y1+1,dim=0))
 				p = torch.stack([1-p, p])  # background
-				parts[i] = torch.cat([parts[i], F.interpolate(p, [128,128], mode='bilinear').argmax(dim=0)], dim=0)
+				parts[i] = torch.cat([parts[i], F.interpolate(p, [128,128], mode='linear').argmax(dim=0)], dim=0)
 
 			# Mouth
 			x1, y1, x2, y2 = rects[bb][20:24].round()
 			p = torch.gather(labels[bb][7:10], 0,  torch.arange(y1, y2+1).unsqueeze(1).repeat_interleave(w,dim=1).unsqueeze(0).repeat_interleave(3,dim=0))
 			p = torch.gather(p, 1,  torch.arange(x1, x2+1).unsqueeze(0).repeat_interleave(y2-y1+1,dim=0).unsqueeze(0).repeat_interleave(3,dim=0))
 			p = torch.cat([1-p.sum(dim=0,keepdim=True), p], 0)  # background
-			parts[i] = torch.cat([parts[i], F.interpolate(p, [128,128], mode='bilinear').argmax(dim=0)], dim=0)
+			parts[i] = torch.cat([parts[i], F.one_hot(F.interpolate(p, [128,128], mode='linear').argmax(dim=0), 4).transpose(0,2).transpose(1,2)], dim=0)
 
 
 
@@ -176,21 +176,32 @@ def evaluate2(model, loader, criterion):
 		for batch in loader:
 				
 			image, labels, rects = batch['image'].to(device), batch['labels'].to(device), batch['rects'].to(device)
-			rects_pred, segm, full = model(image)
+			pred_rects, segm, full = model(image)
 
 			## Loss1
-			loss1 = criterion1(rects_pred, rects)
+			loss1 = criterion1(pred_rects, rects)
+
 
 			## Loss2
 			parts = [torch.tensor([])] * 6
 			b,c,h,w = image.shape
 
 			for bb in range(b):
-				for i in range(6):
+				# Non-mouth
+				for i in range(5):
 					x1, y1, x2, y2 = rects[bb][i*4:(i+1)*4].round()
 					p = torch.gather(labels[bb][2+i], 0,  torch.arange(y1, y2+1).unsqueeze(1).repeat_interleave(w,dim=1))
 					p = torch.gather(p, 1,  torch.arange(x1, x2+1).unsqueeze(0).repeat_interleave(y2-y1+1,dim=0))
-					parts[i] = torch.cat([parts[i], F.interpolate(p, [128,128], mode='bilinear')], dim=0)
+					p = torch.stack([1-p, p])  # background
+					parts[i] = torch.cat([parts[i], F.interpolate(p, [128,128], mode='linear').argmax(dim=0)], dim=0)
+
+				# Mouth
+				x1, y1, x2, y2 = rects[bb][20:24].round()
+				p = torch.gather(labels[bb][7:10], 0,  torch.arange(y1, y2+1).unsqueeze(1).repeat_interleave(w,dim=1).unsqueeze(0).repeat_interleave(3,dim=0))
+				p = torch.gather(p, 1,  torch.arange(x1, x2+1).unsqueeze(0).repeat_interleave(y2-y1+1,dim=0).unsqueeze(0).repeat_interleave(3,dim=0))
+				p = torch.cat([1-p.sum(dim=0,keepdim=True), p], 0)  # background
+				parts[i] = torch.cat([parts[i], F.one_hot(F.interpolate(p, [128,128], mode='linear').argmax(dim=0), 4).transpose(0,2).transpose(1,2)], dim=0)
+
 
 
 			loss2 = []
@@ -199,6 +210,10 @@ def evaluate2(model, loader, criterion):
 
 			## Loss3
 			loss3 = criterion3(full, torch.index_select(labels, dim=1, torch.tensor([0,1,10]).long()).argmax(dim=1, keepdim=False))
+
+
+			## Total loss
+			tot_loss = loss1 + sum(loss2) + loss3
 
 			tot_loss = loss1 + sum(loss2) + loss3
 

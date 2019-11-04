@@ -12,10 +12,7 @@ import pickle
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--batch_size", default=10, type=int, help="Batch size to use during training.")
-parser.add_argument("--display_freq", default=10, type=int, help="Display frequency")
-parser.add_argument("--lr", default=0.01, type=float, help="Learning rate for optimizer")
-parser.add_argument("--epochs", default=10, type=int, help="Number of epochs to train")
+parser.add_argument("--batch_size", default=10, type=int, help="Batch size to use during testing.")
 args = parser.parse_args()
 print(args)
 
@@ -38,7 +35,7 @@ test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True,
 
 
 model = pickle.load(open('res/saved-model.pth', 'rb'))
-
+criterion1 = nn.L1Loss().to(device)
 
 def combine_results(rects, segm, full):
 	
@@ -49,16 +46,17 @@ def combine_results(rects, segm, full):
 		# Non-mouth parts
 		for i in range(5):
 			x1, y1, x2, y2 = rects[bb][i*4:(i+1)*4].round()
-			pred_labels[bb,i+2,y1:y2+1,x1:x2+1] =  F.interpolate(segm[i][bb], [y2-y1+1,x2-x1+1], mode='bilinear').argmax(dim=0)
+			pred_labels[bb,i+2,y1:y2+1,x1:x2+1] =  F.interpolate(segm[i][bb], [y2-y1+1,x2-x1+1], mode='linear').argmax(dim=0)
 
 		# Mouth parts
 		x1, y1, x2, y2 = rects[bb][20:24].round()
-		pred_labels[bb,7:10,y1:y2+1,x1:x2+1] =  F.one_hot(F.interpolate(segm[5][bb], [y2-y1+1,x2-x1+1], mode='bilinear').argmax(dim=0) , 4).transpose(3,1).transpose(2,3)[1:4]
+		pred_labels[bb,7:10,y1:y2+1,x1:x2+1] =  F.one_hot(F.interpolate(segm[5][bb], [y2-y1+1,x2-x1+1], mode='linear').argmax(dim=0) , 4).transpose(2,0).transpose(1,2)[1:4]
 
 
 	# background,skin,hair
-	pred_labels[:,0:2,:,:] =  full[:,0:2,:,:]
-	pred_labels[:,10,:,:] =  full[:,3,:,:]
+	full = F.one_hot(full.argmax(dim=1), 3).transpose(3,1).transpose(2,3)
+	pred_labels[:,0:2,:,:] =  full[:,0:2,:,:].argmax()
+	pred_labels[:,10,:,:] =  full[:,2,:,:]
 
 	return pred_labels
 
@@ -171,7 +169,7 @@ def dewarp(images, labels, pred_labels, landmarks, orig_size):
 
 r_error =0.0
 def rects_error(rects, pred_rects):
-	pass
+	r_error += criterion1(rects, pred_rects).item()
 
 
 def test(model, loader, criterion):
@@ -184,7 +182,7 @@ def test(model, loader, criterion):
 			images, labels, rects, landmarks, indexs, orig_size = batch['image'].to(device), batch['labels'].to(device), batch['rects'].to(device), batch['landmarks'], batch['indexs'], batch['orig_size']
 			pred_rects, segm, full = model(images)
 
-			pred_labels = combine_results(rects_pred, segm, full)
+			pred_labels = combine_results(pred_rects, segm, full)
 			images, labels, pred_labels = dewarp(images, labels, pred_labels, landmarks, orig_size)
 			
 			rects_error(rects, pred_rects)
@@ -197,4 +195,4 @@ if __name__ == '__main__':
 	test()
 	show_F1()
 	print()
-	print("Rects Error: ", r_error)
+	print("Rects Error: ", r_error/len(test_loader))
