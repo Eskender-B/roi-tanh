@@ -5,7 +5,7 @@ from skimage import io
 import matplotlib.pyplot as plt
 import shutil
 from mtcnn.mtcnn import MTCNN
-import cv2
+from skimage import io, transform
 
 
 def get_largest(im, n):
@@ -75,10 +75,10 @@ def prepare(root_dir, new_dir, txt_file):
 
 
 		labels = []
-		for i in self.fg_indexs:
+		for i in range(11):
 			labels.append(io.imread(label_name%i))
-		
 		labels = np.array(labels)
+		
 
 
 		"""
@@ -100,7 +100,8 @@ def prepare(root_dir, new_dir, txt_file):
 		landmarks = detector.detect_faces(image)[0]['keypoints']
 		landmarks = np.array([landmarks[key] for key in ['left_eye', 'right_eye', 'nose', 'mouth_left', 'mouth_right']])
 		warp_obj = Warp(landmarks)
-		image, labels=  np.uint8(warp_obj.warp(image)*255), np.uint8(warp_obj.warp(labels)*255)
+		image =  np.uint8(warp_obj.warp(image)*255)
+		labels = np.uint8(warp_obj.warp(labels.transpose(1,2,0))*255).transpose(2,0,1)
 
 		## Save warped image and label
 		img_name = os.path.join(new_dir, 'images',
@@ -110,7 +111,7 @@ def prepare(root_dir, new_dir, txt_file):
 		shutil.os.mkdir(shutil.os.path.join(new_dir, 'labels', name_list[idx, 1].strip()))
 		label_name = shutil.os.path.join(new_dir, 'labels', name_list[idx, 1].strip(), name_list[idx, 1].strip() + '_lbl%.2d.png')
 		for i in range(len(labels)):
-			io.imsave(label_name%k, labels[i], check_contrast=False)
+			io.imsave(label_name%i, labels[i], check_contrast=False)
 
 
 
@@ -132,6 +133,7 @@ def prepare(root_dir, new_dir, txt_file):
 		
 		rects_list.append(rects)
 		lmarks_list.append(landmarks)
+		print(txt_file + ' :', idx)
 
 
 	name_rects_lmarks_list = np.concatenate((name_list, rects_list, lmarks_list), axis=1)
