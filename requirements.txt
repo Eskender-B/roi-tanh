@@ -1,3 +1,2 @@
 mtcnn
-pytorch-fcn
-cnn_finetune
+torchfcn

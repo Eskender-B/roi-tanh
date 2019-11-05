@@ -6,10 +6,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
+import torch.nn.functional as F
+
 from datetime import datetime
 from mtcnn.mtcnn import MTCNN
 import cv2
 import pickle
+
 
 def get_largest(im, n):
 	# Find contours of the shape
@@ -40,17 +43,17 @@ class ToTensor(object):
 	"""Convert ndarrays in sample to Tensors."""
 
 	def __call__(self, sample):
-		image, labels, rects, landmarks, idx = sample['image'], sample['labels'], sample['rects'], sample['landmarks'], sample['index']
+		image, labels, rects, landmarks, idx, orig_size = sample['image'], sample['labels'], sample['rects'], sample['landmarks'], sample['index'], sample['orig_size']
 
 		# swap color axis because
 		# numpy image: H x W x C
 		# torch image: C X H X W
 		image = image.transpose((2, 0, 1))
 		return {'image': torch.from_numpy(image).float()/255,
-		'labels': F.one_hot(torch.from_numpy(labels).argmax(dim=1), labels.shape[1]).transpose(3,1).transpose(2,3),
+		'labels': F.one_hot(torch.from_numpy(labels).argmax(dim=1), labels.shape[1]).transpose(2,0).transpose(1,2),
 		'rects': torch.from_numpy(rects).float(),
 		'landmarks': landmarks,
-		'index': idx
+		'index': idx,
 		'orig_size': orig_size}
 
 
@@ -97,6 +100,7 @@ class ImageDataset(Dataset):
 		self.name_list = np.loadtxt(os.path.join(root_dir, txt_file), dtype='str', delimiter=',')
 		self.root_dir = root_dir
 		self.transform = transform
+		self.warp_on_fly = warp_on_fly
 
 		if not fg_indexs:
 			self.bg_indexs = sorted(bg_indexs)
@@ -121,25 +125,22 @@ class ImageDataset(Dataset):
 		for i in self.fg_indexs:
 			labels.append(io.imread(label_name%i))
 		
-		labels = np.array(labels)
-		#labels = np.concatenate((labels, [255.0-labels.sum(0)]), axis=0)
+		labels = np.array(labels, dtype=np.uint8)
+		# Add background
+		labels = np.concatenate((labels, [255-labels.sum(0)]), axis=0)
+		labels = np.array(labels, dtype=np.uint8)
 		
 
-		# Add background
-		if type(labels).__module__==np.__name__:
-			labels = np.concatenate((labels, [255-labels.sum(0)]), axis=0)
-		else:
-			labels = torch.cat([labels, torch.tensor(255).to(labels.device) - labels.sum(0, keepdim=True)], 0)
 
 
 		orig_size = image.shape[0:2]
-		if warp_on_fly:
+		if self.warp_on_fly:
 			## Warp object
 			detector = MTCNN()
 			landmarks = detector.detect_faces(image)[0]['keypoints']
 			landmarks = np.array([landmarks[key] for key in ['left_eye', 'right_eye', 'nose', 'mouth_left', 'mouth_right']])
 			warp_obj = Warp(landmarks)
-			image, labels=  np.uint8(warp_obj.warp(image)*255), np.uint8(warp_obj.warp(labels)*255)
+			image, labels=  np.uint8(warp_obj.warp(image)*255), np.uint8(warp_obj.warp(labels.transpose(1,2,0))*255).transpose(2,0,1)
 
 
 			## Calculate part rects on warped image
@@ -155,8 +156,8 @@ class ImageDataset(Dataset):
 			rects = np.array(rects)
 
 		else:
-			rects = self.name_list[idx,2:26]
-			landmarks = self.name_list[26:36].reshape(5,2)
+			rects = np.array(self.name_list[idx,2:26], dtype=np.float)
+			landmarks = np.array(self.name_list[idx,26:36].reshape(5,2), dtype=np.int)
 
 
 

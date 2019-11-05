@@ -4,7 +4,6 @@ import torch.nn as nn
 import torchvision.models as models
 import torchvision.ops as ops
 import torchfcn
-from test import warped
 import fpn
 from torch.jit.annotations import List
 
@@ -73,9 +72,9 @@ class Model(nn.Module):
 		eye1 = rect[:,8:12]
 		eye2 = rect[:,12:16]
 		nose = rect[:,16:20]
-		mouth = rect[;,20:24]
+		mouth = rect[:,20:24]
 
-		indx = torch.tensor(range(rect.shape[0]), dtype=torch.float).view(-1,1)
+		indx = torch.tensor(range(rect.shape[0]), dtype=torch.float).view(-1,1).to(inp.device)
 		eyebrow1 = ops.roi_align(inp2, torch.cat([indx,eyebrow1], dim=1), [32,32], spatial_scale=128./512., sampling_ratio=-1)
 		eyebrow2 = ops.roi_align(inp2, torch.cat([indx,eyebrow2], dim=1), [32,32], spatial_scale=128./512., sampling_ratio=-1)
 		eye1 = ops.roi_align(inp2, torch.cat([indx,eye1], dim=1), [32,32], spatial_scale=128./512., sampling_ratio=-1)

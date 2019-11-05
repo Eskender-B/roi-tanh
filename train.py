@@ -7,6 +7,10 @@ import numpy as np
 from preprocess import ToTensor, ImageDataset
 from torch.utils.data import DataLoader
 from torchvision import transforms, utils
+import argparse
+from utils import LOG_INFO
+import pickle
+from model import Model
 
 
 
@@ -29,9 +33,7 @@ else:
 train_dataset = ImageDataset(txt_file='exemplars.txt',
                                            root_dir='data/SmithCVPR2013_dataset_warped',
                                            bg_indexs=set([0]),
-                                           transform=transforms.Compose([                                               ,
-                                               ToTensor()
-                                           ]))
+                                           transform=transforms.Compose([ToTensor()]))
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
                         shuffle=True, num_workers=4)
 
@@ -39,9 +41,7 @@ train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
 valid_dataset = ImageDataset(txt_file='tuning.txt',
                                            root_dir='data/SmithCVPR2013_dataset_warped',
                                            bg_indexs=set([0]),
-                                           transform=transforms.Compose([
-                                               ToTensor()
-                                           ]))
+                                           transform=transforms.Compose([ToTensor()]))
 valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size,
                         shuffle=True, num_workers=4)
 
@@ -49,9 +49,8 @@ valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size,
 test_dataset = ImageDataset(txt_file='testing.txt',
                                            root_dir='data/SmithCVPR2013_dataset_warped',
                                            bg_indexs=set([0]),
-                                           transform=transforms.Compose([
-                                               ToTensor(),
-                                           ]))
+                                           transform=transforms.Compose([ToTensor()]))
+
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
 
 
@@ -71,7 +70,7 @@ criterion3 = nn.CrossEntropyLoss().to(device)
 
 
 
-def train1(epoch, model, train_loader, optimizer, criterion):
+def train1(epoch, model, train_loader, optimizer):
 	loss_list = []
 	model.train()
 
@@ -95,7 +94,7 @@ def train1(epoch, model, train_loader, optimizer, criterion):
 			loss_list.clear()
 
 
-def train2(epoch, model, train_loader, optimizer, criterion):
+def train2(epoch, model, train_loader, optimizer):
 	loss_list = []
 	model.train()
 
@@ -135,7 +134,7 @@ def train2(epoch, model, train_loader, optimizer, criterion):
 			loss2.append(criterion2(segm[i], parts[i].view(b,128,128)))
 
 		## Loss3
-		loss3 = criterion3(full, torch.index_select(labels, dim=1, torch.tensor([0,1,10]).long()).argmax(dim=1, keepdim=False))
+		loss3 = criterion3(full, labels.index_select(1, torch.tensor([0,1,10]).long()).argmax(dim=1, keepdim=False))
 
 
 		## Total loss
@@ -153,7 +152,7 @@ def train2(epoch, model, train_loader, optimizer, criterion):
 
 
 
-def evaluate1(model, loader, criterion):
+def evaluate1(model, loader):
 	epoch_loss = 0
 	model.eval()
 
@@ -168,7 +167,7 @@ def evaluate1(model, loader, criterion):
 	return epoch_loss / len(loader)
 
 
-def evaluate2(model, loader, criterion):
+def evaluate2(model, loader):
 	epoch_loss = 0
 	model.eval()
 
@@ -209,7 +208,7 @@ def evaluate2(model, loader, criterion):
 				loss2.append(criterion2(segm[i], parts[i].view(b,128,128)))
 
 			## Loss3
-			loss3 = criterion3(full, torch.index_select(labels, dim=1, torch.tensor([0,1,10]).long()).argmax(dim=1, keepdim=False))
+			loss3 = criterion3(full, labels.index_select(1, torch.tensor([0,1,10]).long()).argmax(dim=1, keepdim=False))
 
 
 			## Total loss
@@ -227,8 +226,8 @@ epoch_min = 1
 
 
 for epoch in range(1, args.epochs + 1):
-	train1(epoch, model, train_loader, optimizer, criterion)
-	valid_loss = evaluate1(model, valid_loader, criterion)
+	train1(epoch, model, train_loader, optimizer)
+	valid_loss = evaluate1(model, valid_loader)
 	msg = '...Epoch %02d, val loss = %.4f' % (epoch, valid_loss)
 	LOG_INFO(msg)
 
@@ -236,8 +235,8 @@ for epoch in range(1, args.epochs + 1):
 
 
 for epoch in range(1, args.epochs + 1):
-	train2(epoch, model, train_loader, optimizer, criterion)
-	valid_loss = evaluate2(model, valid_loader, criterion)
+	train2(epoch, model, train_loader, optimizer)
+	valid_loss = evaluate2(model, valid_loader)
 	if valid_loss < LOSS:
 		LOSS = valid_loss
 		epoch_min = epoch
@@ -252,5 +251,5 @@ model = pickle.load(open('res/saved-model.pth', 'rb'))
 
 msg = 'Min @ Epoch %02d, val loss = %.4f' % (epoch_min, LOSS)
 LOG_INFO(msg)
-test_loss = evaluate2(model, test_loader, criterion)
+test_loss = evaluate2(model, test_loader)
 LOG_INFO('Finally, test loss = %.4f' % (test_loss))

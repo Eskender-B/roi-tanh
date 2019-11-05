@@ -132,7 +132,7 @@ def prepare(root_dir, new_dir, txt_file):
 
 		
 		rects_list.append(rects)
-		lmarks_list.append(landmarks)
+		lmarks_list.append(landmarks.reshape(-1))
 		print(txt_file + ' :', idx)
 
 
