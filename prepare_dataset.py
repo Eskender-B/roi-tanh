@@ -126,9 +126,9 @@ def prepare(root_dir, new_dir, txt_file):
 		rects.extend([x,y,x+w,y+h])
 
 		## Code check
-		#lbl = cv2.rectangle(mouth, (x, y), (x+w, y+h), (255,0,0), 2)
-		#plt.imshow(lbl)
-		#plt.show()
+		lbl = cv2.rectangle(mouth, (x, y), (x+w, y+h), (255,0,0), 2)
+		plt.imshow(lbl)
+		plt.show()
 
 		
 		rects_list.append(rects)

@@ -50,7 +50,7 @@ class ToTensor(object):
 		# torch image: C X H X W
 		image = image.transpose((2, 0, 1))
 		return {'image': torch.from_numpy(image).float()/255,
-		'labels': F.one_hot(torch.from_numpy(labels).argmax(dim=1), labels.shape[1]).transpose(2,0).transpose(1,2),
+		'labels': F.one_hot(torch.from_numpy(labels).argmax(dim=0), labels.shape[0]).transpose(2,0).transpose(1,2),
 		'rects': torch.from_numpy(rects).float(),
 		'landmarks': landmarks,
 		'index': idx,

@@ -58,7 +58,7 @@ def combine_results(rects, segm, full):
 
 
 	# background,skin,hair
-	full = F.one_hot(full.argmax(dim=1), 3).transpose(3,1).transpose(2,3)
+	full = F.one_hot(F.interpolate(full, size=[512,512],mode='bilinear').argmax(dim=1), 3).transpose(3,1).transpose(2,3)
 	pred_labels[:,0:2,:,:] =  full[:,0:2,:,:].argmax()
 	pred_labels[:,10,:,:] =  full[:,2,:,:]
 

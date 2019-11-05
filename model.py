@@ -93,7 +93,7 @@ class Model(nn.Module):
 
 
 		# FCN
-		fcn_result = self.FCN(inp)
+		fcn_result = self.FCN(F.interpolate(inp, size=[128,128], mode='bilinear'))
 
 
 		return [rect, segm_result, fcn_result]
