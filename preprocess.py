@@ -48,7 +48,7 @@ class ToTensor(object):
 		# swap color axis because
 		# numpy image: H x W x C
 		# torch image: C X H X W
-		image = image.transpose((2, 0, 1))
+		image = image.transpose(2, 0, 1)
 		return {'image': torch.from_numpy(image).float()/255,
 		'labels': F.one_hot(torch.from_numpy(labels).argmax(dim=0), labels.shape[0]).transpose(2,0).transpose(1,2),
 		'rects': torch.from_numpy(rects).float(),
@@ -79,7 +79,7 @@ class Warp(object):
 	def inverse(self, warped, output_shape):
 		def map_func2(coords):
 			tform2 = transform.SimilarityTransform(scale=257., rotation=0, translation=(255.5, 255.5))
-			return tform2(np.tanh(tform(coords)))
+			return tform2(np.tanh(self.tform(coords)))
 
 		warped_inv = transform.warp(warped, inverse_map=map_func2, output_shape=output_shape )
 		return warped_inv
@@ -133,7 +133,7 @@ class ImageDataset(Dataset):
 
 
 
-		orig_size = image.shape[0:2]
+		orig_size = np.array(image.shape[0:2], dtype=np.int)
 		if self.warp_on_fly:
 			## Warp object
 			detector = MTCNN()
