@@ -55,18 +55,25 @@ class Model(nn.Module):
 		resnet18 = models.resnet18()
 		self.res18_conv = nn.Sequential(*list(resnet18.children())[:-3])
 		self.FPN =  fpn.FPN101()
+		
 		self.FCN = torchfcn.models.FCN8s(n_class=3)
+		self.fcn_conv = nn.Conv2d(256, 3, 1)
+		self.fcn_bnorm = nn.BatchNorm2d(3)
+		
 		self.C_SEG = nn.ModuleList([ComponentSeg(i) for i in [2, 2, 2, 2, 2, 4]])
 		self.C_PRED = ComponentPred()
 
-	def forward(self, inp):
+	def forward(self, inp, rects_only=False):
 
 		# Component pred
-		inp1 = self.res18_conv(inp)
-		rect = self.C_PRED(inp1)
+		inp1 = self.res18_conv.forward(inp)
+		rect = self.C_PRED.forward(inp1)
+
+		if rects_only:
+			return rect
 		
 		# Component segm
-		inp2 = self.FPN(inp)[0]
+		inp2 = self.FPN.forward(inp)[0]
 		eyebrow1 = rect[:,0:4]
 		eyebrow2 = rect[:,4:8]
 		eye1 = rect[:,8:12]
@@ -84,16 +91,17 @@ class Model(nn.Module):
 
 
 		segm_result = []
-		segm_result.append(self.C_SEG[0](eyebrow1))
-		segm_result.append(self.C_SEG[1](eyebrow2))
-		segm_result.append(self.C_SEG[2](eye1))
-		segm_result.append(self.C_SEG[3](eye2))
-		segm_result.append(self.C_SEG[4](nose))
-		segm_result.append(self.C_SEG[5](mouth))
+		segm_result.append(self.C_SEG[0].forward(eyebrow1))
+		segm_result.append(self.C_SEG[1].forward(eyebrow2))
+		segm_result.append(self.C_SEG[2].forward(eye1))
+		segm_result.append(self.C_SEG[3].forward(eye2))
+		segm_result.append(self.C_SEG[4].forward(nose))
+		segm_result.append(self.C_SEG[5].forward(mouth))
 
 
 		# FCN
-		fcn_result = self.FCN(F.interpolate(inp, size=[128,128], mode='bilinear'))
+		fcn_result = self.FCN.forward( self.fcn_bnorm(self.fcn_conv(inp2)) )
+
 
 
 		return [rect, segm_result, fcn_result]

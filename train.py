@@ -18,7 +18,7 @@ from model import Model
 parser = argparse.ArgumentParser()
 parser.add_argument("--batch_size", default=10, type=int, help="Batch size to use during training.")
 parser.add_argument("--display_freq", default=10, type=int, help="Display frequency")
-parser.add_argument("--lr", default=0.01, type=float, help="Learning rate for optimizer")
+parser.add_argument("--lr", default=0.001, type=float, help="Learning rate for optimizer")
 parser.add_argument("--epochs", default=10, type=int, help="Number of epochs to train")
 args = parser.parse_args()
 print(args)
@@ -77,7 +77,7 @@ def train1(epoch, model, train_loader, optimizer):
 	for i, batch in enumerate(train_loader):
 		optimizer.zero_grad()
 		image, rects = batch['image'].to(device), batch['rects'].to(device)
-		pred_rects, segm, full = model(image)
+		pred_rects = model(image,rects_only=True)
 		loss = criterion1(pred_rects, rects)
 
 		loss.backward()
@@ -120,6 +120,9 @@ def train2(epoch, model, train_loader, optimizer):
 			# Non-mouth
 			for i in range(5):
 				x1, y1, x2, y2 = rects_[bb][i*4:(i+1)*4]
+				if x2-x1 <= 0 or y2-y1<=0:
+					x1, y1, x2, y2 = torch.tensor([0,0,511,511]).long()
+
 				p = torch.gather(labels[bb][2+i], 0,  torch.arange(y1, y2+1).unsqueeze(1).repeat_interleave(w,dim=1).to(device))
 				p = torch.gather(p, 1,  torch.arange(x1, x2+1).unsqueeze(0).repeat_interleave(y2-y1+1,dim=0).to(device))
 				p = torch.stack([1-p, p])  # background
@@ -127,6 +130,9 @@ def train2(epoch, model, train_loader, optimizer):
 
 			# Mouth
 			x1, y1, x2, y2 = rects_[bb][20:24]
+			if x2-x1 <= 0 or y2-y1<=0:
+				x1, y1, x2, y2 = torch.tensor([0,0,511,511]).long()
+
 			p = torch.gather(labels[bb][7:10], 1,  torch.arange(y1, y2+1).unsqueeze(1).repeat_interleave(w,dim=1).unsqueeze(0).repeat_interleave(3,dim=0).to(device))
 			p = torch.gather(p, 2,  torch.arange(x1, x2+1).unsqueeze(0).repeat_interleave(y2-y1+1,dim=0).unsqueeze(0).repeat_interleave(3,dim=0).to(device))
 			p = torch.cat([1-p.sum(dim=0,keepdim=True), p], 0)  # background
@@ -154,7 +160,7 @@ def train2(epoch, model, train_loader, optimizer):
 		loss_list3.append(loss3.item())
 		loss_list.append(tot_loss.item())
 		if j % args.display_freq == 0:
-			msg = "Epoch %02d, Iter [%03d/%03d], train loss = %.4f, %.4f, %4.f, %.4f" % (
+			msg = "Epoch %02d, Iter [%03d/%03d], train loss = %.4f, %.4f, %.4f, %.4f" % (
 			epoch, j, len(train_loader), np.mean(loss_list1),np.mean(loss_list2),np.mean(loss_list3),np.mean(loss_list))
 			LOG_INFO(msg)
 			loss_list.clear()
@@ -171,8 +177,8 @@ def evaluate1(model, loader):
 	with torch.no_grad():
 		for batch in loader:
 			image, rects = batch['image'].to(device), batch['rects'].to(device)
-			rects_pred, segm, full = model(image)
-			loss = criterion1(rects_pred, rects)
+			pred_rects = model(image,rects_only=True)
+			loss = criterion1(pred_rects, rects)
 
 			epoch_loss += loss.item()
 
@@ -205,6 +211,9 @@ def evaluate2(model, loader):
 				# Non-mouth
 				for i in range(5):
 					x1, y1, x2, y2 = rects_[bb][i*4:(i+1)*4]
+					if x2-x1 <= 0 or y2-y1<=0:
+						x1, y1, x2, y2 = torch.tensor([0,0,511,511]).long()
+
 					p = torch.gather(labels[bb][2+i], 0,  torch.arange(y1, y2+1).unsqueeze(1).repeat_interleave(w,dim=1).to(device))
 					p = torch.gather(p, 1,  torch.arange(x1, x2+1).unsqueeze(0).repeat_interleave(y2-y1+1,dim=0).to(device))
 					p = torch.stack([1-p, p])  # background
@@ -212,6 +221,9 @@ def evaluate2(model, loader):
 
 				# Mouth
 				x1, y1, x2, y2 = rects_[bb][20:24]
+				if x2-x1 <= 0 or y2-y1<=0:
+					x1, y1, x2, y2 = torch.tensor([0,0,511,511]).long()
+			
 				p = torch.gather(labels[bb][7:10], 1,  torch.arange(y1, y2+1).unsqueeze(1).repeat_interleave(w,dim=1).unsqueeze(0).repeat_interleave(3,dim=0).to(device))
 				p = torch.gather(p, 2,  torch.arange(x1, x2+1).unsqueeze(0).repeat_interleave(y2-y1+1,dim=0).unsqueeze(0).repeat_interleave(3,dim=0).to(device))
 				p = torch.cat([1-p.sum(dim=0,keepdim=True), p], 0)  # background
