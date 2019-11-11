@@ -100,8 +100,8 @@ def prepare(root_dir, new_dir, txt_file):
 		landmarks = detector.detect_faces(image)[0]['keypoints']
 		landmarks = np.array([landmarks[key] for key in ['left_eye', 'right_eye', 'nose', 'mouth_left', 'mouth_right']])
 		warp_obj = Warp(landmarks)
-		image =  np.uint8(warp_obj.warp(image)*255)
-		labels = np.uint8(warp_obj.warp(labels.transpose(1,2,0))*255).transpose(2,0,1)
+		image =  np.uint8(warp_obj.warp(image).clip(0.0,1.0)*255)
+		labels = np.uint8(warp_obj.warp(labels.transpose(1,2,0)).clip(0.0,1.0)*255).transpose(2,0,1)
 
 		## Save warped image and label
 		img_name = os.path.join(new_dir, 'images',
@@ -126,9 +126,15 @@ def prepare(root_dir, new_dir, txt_file):
 		rects.extend([x,y,x+w,y+h])
 
 		## Code check
+		"""
 		lbl = cv2.rectangle(mouth, (x, y), (x+w, y+h), (255,0,0), 2)
 		plt.imshow(lbl)
 		plt.show()
+
+		lbl = cv2.rectangle(labels, 0,255), (rects[8], rects[9]), (rects[10], rects[11]), (255,0,0), 2)
+		plt.imshow(lbl)
+		plt.show()
+		"""
 
 		
 		rects_list.append(rects)

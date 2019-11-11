@@ -127,7 +127,7 @@ class ImageDataset(Dataset):
 		
 		labels = np.array(labels, dtype=np.uint8)
 		# Add background
-		labels = np.concatenate((labels, [255-labels.sum(0)]), axis=0)
+		labels = np.concatenate(([255-labels.sum(0)], labels), axis=0)
 		labels = np.array(labels, dtype=np.uint8)
 		
 
@@ -140,7 +140,7 @@ class ImageDataset(Dataset):
 			landmarks = detector.detect_faces(image)[0]['keypoints']
 			landmarks = np.array([landmarks[key] for key in ['left_eye', 'right_eye', 'nose', 'mouth_left', 'mouth_right']])
 			warp_obj = Warp(landmarks)
-			image, labels=  np.uint8(warp_obj.warp(image)*255), np.uint8(warp_obj.warp(labels.transpose(1,2,0))*255).transpose(2,0,1)
+			image, labels=  np.uint8(warp_obj.warp(image).clip(0,1)*255), np.uint8(warp_obj.warp(labels.transpose(1,2,0)).clip(0,1)*255).transpose(2,0,1)
 
 
 			## Calculate part rects on warped image

@@ -38,9 +38,11 @@ test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True,
 
 
 model = pickle.load(open('res/saved-model.pth', 'rb'))
+model = model.to(device)
 criterion1 = nn.L1Loss().to(device)
-
+n=0
 def combine_results(rects, segm, full):
+	global n
 	
 	batch_size,_,_,_ = full.shape
 	pred_labels = torch.zeros([batch_size,11,512,512], dtype=torch.long)
@@ -57,9 +59,19 @@ def combine_results(rects, segm, full):
 
 
 	# background,skin,hair
-	full = F.one_hot(F.interpolate(full, size=[512,512],mode='bilinear').argmax(dim=1), 3).transpose(3,1).transpose(2,3)
-	pred_labels[:,0:2,:,:] =  full[:,0:2,:,:].argmax()
-	pred_labels[:,10,:,:] =  full[:,2,:,:]
+	full = F.one_hot(F.interpolate(full, size=[512,512],mode='bilinear').argmax(dim=1), 3).transpose(3,1).transpose(2,3).to('cpu').numpy().astype(np.uint8)*255
+	plt.imshow(full[0][0])
+	n=n+1
+	plt.savefig('res/test%d.jpg'%n)
+	plt.imshow(full[0][1])
+	n=n+1
+	plt.savefig('res/test%d.jpg'%n)
+	plt.imshow(full[0][2])
+	n=n+1
+	plt.savefig('res/test%d.jpg'%n)
+	print('test', full.min(), full.max())
+	#pred_labels[:,0:2,:,:] =  full[:,0:2,:,:]
+	#pred_labels[:,10,:,:] =  full[:,2,:,:]
 
 	return pred_labels
 
@@ -126,7 +138,7 @@ def save_result(image, label, pred_label, idx):
 	pred_mask = np.expand_dims(pred_label,-1) * colors.reshape(11,1,1,3)
 	pred_mask = pred_mask.sum(0).astype(np.float) # May need to fix here
 
-	alpha = 0.1
+	alpha = 0.5
 	ground = np.where(orig_mask==np.array([0., 0., 0.]), image, alpha*image + (1.-alpha)*orig_mask)
 	pred = np.where(pred_mask==np.array([0., 0., 0.]), image, alpha*image + (1.-alpha)*pred_mask)  
 
@@ -162,6 +174,7 @@ def score_save(images, labels, pred_labels, landmarks, orig_size, indexs):
 		dimage = warp_obj.inverse(images[i], orig_size[i])
 		dlabel = F.one_hot(torch.from_numpy(warp_obj.inverse(labels[i], orig_size[i]).transpose(2,0,1)).argmax(dim=0), l).numpy().transpose(2,0,1)
 		dpred_label = F.one_hot(torch.from_numpy(warp_obj.inverse(pred_labels[i], orig_size[i]).transpose(2,0,1)).argmax(dim=0), l).numpy().transpose(2,0,1)
+
 
 		calculate_F1(dlabel, dpred_label)
 		save_result(dimage, dlabel, dpred_label, indexs[i])
