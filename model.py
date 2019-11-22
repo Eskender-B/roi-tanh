@@ -6,6 +6,7 @@ import torchvision.ops as ops
 import torchfcn
 import fpn
 from torch.jit.annotations import List
+from fcn import FCN8s, VGGNet
 
 class ComponentPred(nn.Module):
 	"""docstring for ComponentPred"""
@@ -56,7 +57,8 @@ class Model(nn.Module):
 		self.res18_conv = nn.Sequential(*list(resnet18.children())[:-3])
 		self.FPN =  fpn.FPN101()
 		
-		self.FCN = torchfcn.models.FCN8s(n_class=3)
+		self.vgg_model = VGGNet(requires_grad=True)
+		self.FCN = FCN8s(pretrained_net=self.vgg_model, n_class=3)
 		self.fcn_conv = nn.Conv2d(256, 3, 1)
 		self.fcn_bnorm = nn.BatchNorm2d(3)
 		
@@ -100,7 +102,9 @@ class Model(nn.Module):
 
 
 		# FCN
+		#fcn_result = self.FCN.forward(inp2)
 		fcn_result = self.FCN.forward( self.fcn_bnorm(self.fcn_conv(inp2)) )
+		#fcn_result = self.FCN.forward( F.interpolate(inp, size=[128,128], mode='bilinear') )
 
 
 

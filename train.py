@@ -15,11 +15,13 @@ from model import Model
 
 
 
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--batch_size", default=10, type=int, help="Batch size to use during training.")
 parser.add_argument("--display_freq", default=10, type=int, help="Display frequency")
 parser.add_argument("--lr", default=0.001, type=float, help="Learning rate for optimizer")
 parser.add_argument("--epochs", default=10, type=int, help="Number of epochs to train")
+parser.add_argument("--load_model", default=False, type=bool, help="Wether to continue training from last checkpoint")
 args = parser.parse_args()
 print(args)
 
@@ -145,7 +147,10 @@ def train2(epoch, model, train_loader, optimizer):
 			loss2.append(criterion2[i](segm[i], parts[i].view(b,128,128)))
 
 		## Loss3
-		full_l = F.interpolate(labels.float().index_select(1, torch.tensor([0,1,10]).long().to(device)), size=[128,128], mode='bilinear').argmax(dim=1)
+		face_hair = labels.float().index_select(1, torch.tensor([1,10]).long().to(device))
+		bg = 1. - face_hair.sum(dim=1, keepdim=True)
+		face_hair_bg = torch.cat([bg,face_hair], dim=1)
+		full_l = F.interpolate(face_hair_bg, size=[128,128], mode='bilinear').argmax(dim=1)
 		loss3 = criterion3(full, full_l)
 
 
@@ -236,7 +241,10 @@ def evaluate2(model, loader):
 				loss2.append(criterion2[i](segm[i], parts[i].view(b,128,128)))
 
 			## Loss3
-			full_l = F.interpolate(labels.float().index_select(1, torch.tensor([0,1,10]).long().to(device)), size=[128,128], mode='bilinear').argmax(dim=1)
+			face_hair = labels.float().index_select(1, torch.tensor([1,10]).long().to(device))
+			bg = 1. - face_hair.sum(dim=1, keepdim=True)
+			face_hair_bg = torch.cat([bg,face_hair], dim=1)
+			full_l = F.interpolate(face_hair_bg, size=[128,128], mode='bilinear').argmax(dim=1)
 			loss3 = criterion3(full, full_l)
 
 
@@ -255,7 +263,10 @@ def evaluate2(model, loader):
 LOSS = 100
 epoch_min = 1
 
-for epoch in range(1, args.epochs + 1):
+if args.load_model:
+	model = pickle.load(open('res/saved-model.pth', 'rb'))
+
+for epoch in range(1, 1 + 1):
 	train1(epoch, model, train_loader, optimizer)
 	valid_loss = evaluate1(model, valid_loader)
 	msg = '...Epoch %02d, val loss = %.4f' % (epoch, valid_loss)
@@ -265,8 +276,8 @@ for epoch in range(1, args.epochs + 1):
 for epoch in range(1, args.epochs + 1):
 	train2(epoch, model, train_loader, optimizer)
 	l1,l2,l3,lt = evaluate2(model, valid_loader)
-	if lt < LOSS:
-		LOSS = lt
+	if l3 < LOSS:
+		LOSS = l3
 		epoch_min = epoch
 		pickle.dump(model, open('res/saved-model.pth', 'wb'))
 

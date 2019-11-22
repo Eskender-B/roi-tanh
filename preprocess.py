@@ -125,13 +125,12 @@ class ImageDataset(Dataset):
 		for i in self.fg_indexs:
 			labels.append(io.imread(label_name%i))
 		
-		labels = np.array(labels, dtype=np.uint8)
+
 		# Add background
+		labels = np.array(labels, dtype=np.uint8)
 		labels = np.concatenate(([255-labels.sum(0)], labels), axis=0)
 		labels = np.array(labels, dtype=np.uint8)
 		
-
-
 
 		orig_size = np.array(image.shape[0:2], dtype=np.int)
 		if self.warp_on_fly:
@@ -142,7 +141,7 @@ class ImageDataset(Dataset):
 			warp_obj = Warp(landmarks)
 			image, labels=  np.uint8(warp_obj.warp(image).clip(0,1)*255), np.uint8(warp_obj.warp(labels.transpose(1,2,0)).clip(0,1)*255).transpose(2,0,1)
 
-
+			
 			## Calculate part rects on warped image
 			rects = []
 			for i in [2,3,4,5,6]:
@@ -154,6 +153,7 @@ class ImageDataset(Dataset):
 			rects.extend([x,y,x+w,y+h])
 
 			rects = np.array(rects)
+			#rects = np.array([])
 
 		else:
 			rects = np.array(self.name_list[idx,2:26], dtype=np.float)

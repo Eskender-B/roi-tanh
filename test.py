@@ -40,38 +40,33 @@ test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True,
 model = pickle.load(open('res/saved-model.pth', 'rb'))
 model = model.to(device)
 criterion1 = nn.L1Loss().to(device)
-n=0
+
 def combine_results(rects, segm, full):
 	global n
 	
 	batch_size,_,_,_ = full.shape
-	pred_labels = torch.zeros([batch_size,11,512,512], dtype=torch.long)
+	pred_labels = torch.zeros([batch_size,10,512,512], dtype=torch.long)
 
 	for bb in range(batch_size):
 		# Non-mouth parts
 		for i in range(5):
 			x1, y1, x2, y2 = rects[bb][i*4:(i+1)*4].round().long().to('cpu').numpy()
-			pred_labels[bb,i+2,y1:y2+1,x1:x2+1] =  F.interpolate(segm[i][bb].unsqueeze(0), [y2-y1+1,x2-x1+1], mode='bilinear').squeeze(0).argmax(dim=0)
+			pred_labels[bb,i+1,y1:y2+1,x1:x2+1] =  F.interpolate(segm[i][bb].unsqueeze(0), [y2-y1+1,x2-x1+1], mode='bilinear').squeeze(0).argmax(dim=0)
 
 		# Mouth parts
 		x1, y1, x2, y2 = rects[bb][20:24].round().long().to('cpu').numpy()
-		pred_labels[bb,7:10,y1:y2+1,x1:x2+1] =  F.one_hot(F.interpolate(segm[5][bb].unsqueeze(0), [y2-y1+1,x2-x1+1], mode='bilinear').squeeze(0).argmax(dim=0) , 4).transpose(2,0).transpose(1,2)[1:4]
+		pred_labels[bb,6:9,y1:y2+1,x1:x2+1] =  F.one_hot(F.interpolate(segm[5][bb].unsqueeze(0), [y2-y1+1,x2-x1+1], mode='bilinear').squeeze(0).argmax(dim=0) , 4).transpose(2,0).transpose(1,2)[1:4]
 
 
 	# background,skin,hair
-	full = F.one_hot(F.interpolate(full, size=[512,512],mode='bilinear').argmax(dim=1), 3).transpose(3,1).transpose(2,3).to('cpu').numpy().astype(np.uint8)*255
-	plt.imshow(full[0][0])
-	n=n+1
-	plt.savefig('res/test%d.jpg'%n)
-	plt.imshow(full[0][1])
-	n=n+1
-	plt.savefig('res/test%d.jpg'%n)
-	plt.imshow(full[0][2])
-	n=n+1
-	plt.savefig('res/test%d.jpg'%n)
-	print('test', full.min(), full.max())
-	#pred_labels[:,0:2,:,:] =  full[:,0:2,:,:]
-	#pred_labels[:,10,:,:] =  full[:,2,:,:]
+	full = F.one_hot(F.interpolate(full, size=[512,512],mode='bilinear').argmax(dim=1), 3).transpose(3,1).transpose(2,3)
+	pred_labels[:,0,:,:] =  full[:,1,:,:]
+	pred_labels[:,9,:,:] =  full[:,2,:,:]
+
+
+
+	bg = 1 - pred_labels.sum(dim=1, keepdim=True).clamp(0,1)
+	pred_labels = torch.cat([bg, pred_labels], dim=1)
 
 	return pred_labels
 
@@ -105,9 +100,6 @@ def show_F1():
 		tot_p += PRECISION[key]
 		tot_r += RECALL[key]
 
-	#avg_p = tot_p/len(TP)
-	#avg_r = tot_r/len(TP)
-	#overall_F1 = 2.* avg_p*avg_r/ (avg_p+avg_r)
 
 	mouth_p = (PRECISION['u_lip'] + PRECISION['i_mouth'] + PRECISION['l_lip'])/3.0
 	mouth_r = (RECALL['u_lip'] + RECALL['i_mouth'] + RECALL['l_lip'])/3.0
